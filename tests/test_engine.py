@@ -105,7 +105,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(turn['state']['turn'], 1)
         self.assertEqual(self.request(f"/api/games/{game['id']}")['state'], turn['state'])
         with urllib.request.urlopen(self.base+'/') as response:
-            self.assertIn(b'Frontier Command', response.read())
+            self.assertIn(b'CROWNFALL', response.read())
 
     @patch.dict(os.environ, {'PLAY_ACCESS_TOKEN':'private-test-token'})
     def test_unauthorized_live_is_rejected(self):

@@ -1,65 +1,90 @@
-# ThePlan — Frontier Command
+# Crownfall — The Last Banner
 
-A playable multi-agent strategy simulation. You command Aurora on a nine-province map while Claude and GPT command rival factions. Issue a direct order or delegate to your Claude strategist. Model agents plan in parallel against the same turn snapshot; deterministic Python rules resolve the outcome.
+A playable fantasy conquest game built for a website. Command the blue kingdom, recruit soldiers, strengthen castles, and march on neighboring strongholds. Capture six of nine strongholds before nightfall to claim the crown.
 
-## Play locally
+The interface is a full-screen animated battlefield, with no AI branding or technical controls. Claude and GPT can drive rival kingdoms behind the scenes; the free local mode uses deterministic opponents.
 
-Requires Python 3.12+; no third-party dependencies.
+## Play
+
+Python 3.12+, no third-party dependencies:
 
 ```sh
 python -m engine.server
 ```
 
-Open http://127.0.0.1:8000 and start an **Offline demo** campaign. Pick an Aurora province, choose an action, and resolve a turn. Games persist in SQLite and the browser remembers the last game ID. Demo agents use local heuristics and never call providers. Strategy text influences the Aurora agent in live mode; direct orders work in both modes.
+Open http://127.0.0.1:8000, then **Raise your banner**. Orders resolve every four seconds. When you do not issue an order, your soldiers hold position and gather supplies. Campaigns persist in SQLite; **Continue campaign** restores the browser's last campaign.
 
-## Claude + GPT live play
+| Control | Action |
+| --- | --- |
+| Click or tap your castle | Select your stronghold |
+| Click a connected enemy castle | Queue an attack |
+| Arrow keys / 1–9 | Select a stronghold |
+| R | Recruit three soldiers for three gold |
+| F | Add a wall level for three gold |
+| G | Gather four additional gold |
+| A, arrows, Enter | Choose and confirm an attack target |
+| Space / Escape | Pause or resume |
+| M | Toggle synthesized sound |
+| ? / H | Open the field manual |
 
-Configure environment variables from `.env.example` in your host's secret settings, then restart the server. This application does not load `.env` files automatically. API keys stay server-side. For a private local pilot, generate a long random `PLAY_ACCESS_TOKEN`, set it on the server, and enter that access token in the game's password field. This token is separate from both provider API keys and is held only in browser memory. Reloading requires entering it again. Do not share the pilot token on a public website.
+The game pauses when its window loses focus. Sound starts muted and only plays after enabling it. Reduced-motion preferences reduce environmental motion and disable combat shake.
 
-| Faction | Agent role | Provider | Default model | Override |
-| --- | --- | --- | --- | --- |
-| Aurora | Your strategist | Anthropic | `claude-sonnet-4-5` | `CLAUDE_STRATEGIST_MODEL` |
-| Ember | Rival tactician | OpenAI | `gpt-4.1-mini` | `GPT_TACTICIAN_MODEL` |
-| Verdant | Rival scout | Anthropic | `claude-haiku-4-5` | `CLAUDE_SCOUT_MODEL` |
-
-Model IDs are configurable; confirm availability for your provider accounts. This integrates the **Anthropic API**, not a Claude subscription or Claude website session. Likewise, OpenAI API billing is separate from ChatGPT subscriptions. No provider credentials were available during implementation, so live calls require verification in your account.
-
-Each live turn makes up to three provider requests, including Aurora even when the player overrides its order. Output is capped at 300 tokens per request; input includes the current state and the last 100 log entries. Requests have a 35-second timeout. There are no automatic retries, background loops, tool execution, or recursive agent spawning. A provider failure or invalid order leaves the turn uncommitted and reports an error; it never silently changes to demo mode. A retry can incur new provider charges.
+Animation includes swaying trees, marching squads with leg movement, idle soldiers, waving flags, chimney smoke, drifting cloud shadows, moving river glints, circling birds, pulsing selection rings, animated attack routes, reinforcement effects, combat particles, camera shake, victory bursts, and a dawn-to-dusk color shift. Terrain and castles render procedurally on Canvas; no downloaded art assets are required. Google Fonts are optional, with local font fallbacks.
 
 ## Rules
 
-- Nine provinces on a 3×3 orthogonal grid. Each faction starts with three provinces, three troops per province, and six gold.
-- Each faction selects one order per turn. Every active faction gains one gold per owned province; costs are validated against the pre-turn balance.
-- Gather adds four gold; recruit costs three gold for three troops; fortify costs three gold for one defense level, up to three.
-- Attack an adjacent enemy with all source troops except one. Attack strength is committed troops plus d6; defense is defending troops plus fort plus d6. Ties favor the defender. A successful attacker occupies with `max(1, committed troops - defending troops)` and removes the fort. On failure, defenders lose `max(1, committed troops // 2)` troops, with at least one survivor.
-- Economy orders resolve before attacks. Combat initiative rotates Aurora → Ember → Verdant each turn. An attack is cancelled if its source has since been captured or reduced to one troop. RNG is seeded by world seed and turn for reproducible resolution.
-- Six provinces wins immediately after resolution. At turn 30, most provinces wins; a tied lead is a draw. Eliminated factions stop receiving orders.
+Nine strongholds on a 3×3 road network. Every house starts with three strongholds, three soldiers at each stronghold, and six gold. Each round grants one gold per owned stronghold. Every house issues one order each round.
 
-## Engine and API
+Gather adds four gold. Recruit costs three gold and adds three soldiers. Fortify costs three gold and adds one defense level, up to three. Costs must be affordable before the round's income.
 
-`engine/game.py` owns all rules and validation. `engine/agents.py` owns provider adapters and bounded parallel planning. `engine/server.py` serves the game and stores campaigns and turn journals atomically in SQLite, including orders and before/after state hashes.
+An attack commits every soldier except one defender. Attack strength is committed soldiers plus a seeded d6; defense is defending soldiers plus walls plus a seeded d6. Ties favor defenders. Successful attackers occupy with `max(1, committed - defending soldiers)` and remove walls. Failed attacks reduce the defenders by `max(1, committed // 2)`, leaving at least one survivor.
 
-| Method | Path | Body / response |
+Economy resolves first. Combat initiative rotates each round. Attacks cancel if their source has already fallen or no longer has enough soldiers. Six strongholds wins. At round 30, the largest kingdom wins; tied leaders draw. Losing every stronghold ends the player's campaign immediately.
+
+## Live Claude + GPT opponents
+
+Use host-managed secrets from `.env.example`; Python does not automatically load that file. The engine integrates Anthropic and OpenAI APIs. API billing is separate from Claude or ChatGPT subscriptions.
+
+| House | Role | Provider | Default model | Environment override |
+| --- | --- | --- | --- | --- |
+| Aurora / blue | Strategist | Anthropic | `claude-sonnet-4-5` | `CLAUDE_STRATEGIST_MODEL` |
+| Ember / red | Tactician | OpenAI | `gpt-4.1-mini` | `GPT_TACTICIAN_MODEL` |
+| Verdant / violet | Scout | Anthropic | `claude-haiku-4-5` | `CLAUDE_SCOUT_MODEL` |
+
+Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `PLAY_ACCESS_TOKEN` on the server. For deployed live play, your authenticated website backend must inject the engine bearer token server-side. Access `/play/?mode=live` through that backend. Default mode is free/demo. The browser has no token field and no provider secrets. Model IDs are configurable; verify availability with the provider accounts.
+
+Each live round makes up to three parallel model calls, including the Aurora adviser whose proposal is overridden by direct player commands. These roles use the same game snapshot; only deterministic engine rules can change the state. Output is capped at 300 tokens per call, with a 35-second timeout. No recursive spawning, tools, shell execution, or automatic retries. The game waits for provider completion before scheduling the next four-second round. Live rounds therefore take longer than local rounds.
+
+Provider failure or an invalid model order does not commit the round. The game pauses and lets the player retry; a retry can incur new charges. Live API calls have not been verified because this workspace has no provider credentials.
+
+## Architecture and API
+
+- `web/index.html`: Canvas game, animation loop, touch/mouse and keyboard controls, Web Audio effects, and presentation.
+- `engine/game.py`: authoritative rules, validation, seeded resolution, and local opponents.
+- `engine/agents.py`: configurable Claude/GPT adapters and bounded parallel planning.
+- `engine/server.py`: HTTP API and SQLite campaigns/atomic turn journals, including before/after hashes.
+
+| Method | Path | Request / result |
 | --- | --- | --- |
-| GET | `/api/health` | Status and configured model IDs; no secrets |
+| GET | `/api/health` | Status and model metadata; no secrets |
 | POST | `/api/games` | `{ "mode": "demo", "seed": 42 }` → game |
 | GET | `/api/games/{id}` | Persisted game |
-| POST | `/api/games/{id}/turn` | `{ "expected_turn": 0, "directive": "Hold the center", "order": { "action": "recruit", "source": 0 } }` → game + orders |
+| POST | `/api/games/{id}/turn` | `{ "expected_turn": 0, "order": { "action": "recruit", "source": 0 } }` → game and orders |
 
-`order` is optional; omit it to delegate Aurora's move. `attack` also needs `target`. Province IDs are 0–8; UI labels are 1–9. Live game creation, reads, and turns require `Authorization: Bearer <PLAY_ACCESS_TOKEN>`. JSON requests only; no CORS allowances. A stale turn returns 400; concurrent turns return 409; invalid live access returns 403; provider errors return 502. Game IDs are unguessable bearer capabilities for demo campaigns; they are not a user account system.
+Province IDs are 0–8. An attack also needs `target`. Omit `order` to delegate Aurora to its adviser; the game's direct controls normally supply orders. Live creation, reads, and rounds require `Authorization: Bearer <PLAY_ACCESS_TOKEN>`. JSON requests only; no CORS allowances. Invalid/stale orders return 400, concurrent rounds 409, denied live access 403, and provider failure 502.
 
-## Website integration
+## Put it on the website
 
-See [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) for a ready-to-send implementation brief. This is a runnable single-process pilot, not a deployed public multiplayer service. Bind it to localhost behind your website backend or a private service network. Run exactly one process with persistent storage. The global turn lock intentionally allows only one turn across all games at a time. For broader traffic, add a job queue and database-level concurrency control.
+Give Claude [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md). Run one engine process behind the website backend with persistent storage. Proxy `/play/` to engine `/` and `/play/api/*` to `/api/*`. API paths are relative to the game's directory. The Dockerfile is an alternative for a backend host; persist `/data`.
 
-The browser interface can be mounted at `/play/` if the website proxies `/play/api/*` to the engine's `/api/*` and `/play/` to `/`. Its API URLs are relative. A static-only website needs a separate backend host. The Dockerfile supplies a container option; mount a persistent volume at `/data`.
+This is a single-player pilot, not a deployed public service. A static-only website requires a separate backend host. Before paid public live play, the website backend must authenticate users, enforce campaign ownership, rate-limit requests, enforce daily quotas, and inject the shared engine token server-side. Strip client-supplied engine Authorization headers and set provider-side spending caps. Keep live mode unavailable until these controls exist. Public demo mode does not incur provider charges but still needs request limits and storage housekeeping.
 
-Before public paid play, your website backend must authenticate users, enforce campaign ownership, apply per-user/IP rate limits and daily spend quotas, and inject the engine access token server-side. Remove the pilot token field for that deployment. Set provider-side project spending limits. Do not put provider keys or the shared engine access token in public JavaScript. The pilot does not implement website login, per-user billing, distributed jobs, multiplayer matchmaking, or streaming.
+Use one process: the global turn lock intentionally allows one round across all campaigns at a time. Scaling requires queued jobs and database-level concurrency control. Game IDs are unguessable demo access capabilities, not website accounts.
 
-## Verify
+## Verification
 
 ```sh
 python -m unittest discover -s tests -v
 ```
 
-Tests cover deterministic replay over 20 seeds, state invariants, invalid orders, player overrides, persistence, stale turns, provider failure rollback, mocked Anthropic/OpenAI request contracts, and HTTP gameplay/authentication.
+Eight tests cover seeded replay over 20 worlds, invariants, invalid orders, persistence, player overrides, stale rounds, provider rollback, provider contract mocks, and HTTP gameplay/access control. Chromium checks cover the title screen, recruitment, keyboard attack, round resolution, pause/resume, help, arrows, number keys, sound toggling, and mobile layout.
