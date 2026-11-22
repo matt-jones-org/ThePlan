@@ -1,3 +1,7 @@
+"""Engine tests: rules, persistence, provider adapters (mocked) and the HTTP API.
+
+Run with: python -m unittest discover -s tests -v
+"""
 import json
 import os
 from pathlib import Path
@@ -24,6 +28,7 @@ class RulesTests(unittest.TestCase):
                 before = state_hash(state)
                 orders = plan_turn(state, '', 'demo')
                 next_state = resolve(state, orders)
+                # Same input, same output, and the input state is left untouched.
                 self.assertEqual(next_state, resolve(state, orders))
                 self.assertEqual(before, state_hash(state))
                 self.assertEqual(len(next_state['regions']), 9)
@@ -46,6 +51,7 @@ class RulesTests(unittest.TestCase):
             store = Store(str(Path(folder) / 'test.db'))
             game = store.create('demo', 42)
             result = store.turn(game['id'], 0, '', {'action':'gather','source':0})
+            # 6 starting gold + 3 income (three provinces) + 4 for gathering.
             self.assertEqual(result['state']['factions']['aurora']['gold'], 13)
             self.assertEqual(store.read(game['id'])['state'], result['state'])
             with self.assertRaises(ValueError):
@@ -74,6 +80,7 @@ class RulesTests(unittest.TestCase):
         self.assertEqual(model_order(new_game(), 'ember', 'defend', fake)['source'], 3)
         self.assertEqual(calls[0][1]['max_tokens'], 300)
         self.assertEqual(calls[1][1]['response_format'], {'type':'json_object'})
+        # The player's directive must only reach their own faction's model.
         self.assertNotIn('defend', calls[1][1]['messages'][1]['content'])
         with self.assertRaises(ProviderError):
             model_order(new_game(), 'aurora', '', lambda *_: {'content':[]})

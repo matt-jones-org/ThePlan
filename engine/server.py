@@ -1,4 +1,8 @@
-"""Small local HTTP API with SQLite persistence and atomic game turns."""
+"""Small local HTTP API with SQLite persistence and atomic game turns.
+
+Meant to run as a single process behind the website backend; see README for
+the proxy and access-control setup this assumes.
+"""
 import argparse
 import hmac
 import json
@@ -16,6 +20,8 @@ WEB = Path(__file__).resolve().parent.parent / "web" / "index.html"
 
 
 class Store:
+    """SQLite-backed games plus an append-only journal of every committed turn."""
+
     def __init__(self, path):
         self.path = path
         self.lock = threading.Lock()
@@ -27,6 +33,7 @@ class Store:
         return sqlite3.connect(self.path, timeout=10)
 
     def create(self, mode, seed):
+        # Anyone holding a demo game ID can read and play it, so it must be unguessable.
         game_id = secrets.token_urlsafe(24)
         state = new_game(seed)
         with self.connect() as db:
@@ -41,6 +48,10 @@ class Store:
         return {"id": game_id, "mode": row[0], "state": json.loads(row[1])}
 
     def turn(self, game_id, expected_turn, directive, player_order=None):
+        """Plan, resolve and commit one turn, or raise and leave the game unchanged.
+
+        ``expected_turn`` is an optimistic check so a stale client can't replay a turn.
+        """
         # One global lock bounds provider concurrency and serializes state commits.
         if not self.lock.acquire(blocking=False):
             raise BlockingIOError("Another turn is running; try again shortly")
@@ -51,14 +62,19 @@ class Store:
                 raise ValueError("Stale turn; reload the game before trying again")
             if before["winner"]:
                 raise ValueError("Game has ended")
+            # Validate the player's order first so a bad one fails before any paid model calls.
             if player_order is not None:
                 player_order = validate_order(before, "aurora", player_order)
+            # Aurora's adviser is still consulted (and billed in live mode) even when
+            # the player's order replaces its proposal below.
             orders = plan_turn(before, directive, game["mode"])
             if player_order is not None:
                 orders["aurora"] = player_order
             after = resolve(before, orders)
             record = {"orders": orders, "directive": directive, "before_hash": state_hash(before),
                       "after_hash": state_hash(after), "state": after}
+            # Both writes share one transaction; the (game, turn) primary key also
+            # rejects a duplicate commit of the same turn.
             with self.connect() as db:
                 db.execute("UPDATE games SET state=? WHERE id=?", (json.dumps(after), game_id))
                 db.execute("INSERT INTO turns VALUES (?, ?, ?)", (game_id, after["turn"], json.dumps(record)))
@@ -83,10 +99,13 @@ def make_handler(store):
             self.wfile.write(payload)
 
         def authorized(self, mode):
+            # Demo games are open. Live games cost money per turn, so they need the
+            # shared token, which the website backend is expected to inject.
             if mode != "live":
                 return
             token = os.getenv("PLAY_ACCESS_TOKEN", "")
             supplied = self.headers.get("Authorization", "")
+            # An unset token locks live mode out entirely rather than leaving it open.
             if not token or not hmac.compare_digest(supplied, "Bearer " + token):
                 raise PermissionError("Live play requires an authorized website backend or pilot access token")
 
@@ -144,6 +163,8 @@ def make_handler(store):
                     self.send_json(200, store.turn(game_id, expected, directive, data.get("order")))
                 else:
                     self.send_json(404, {"error": "Not found"})
+            # Exception type picks the status code. Anything unexpected gets a generic
+            # 500 so internals never reach the client.
             except PermissionError as exc:
                 self.send_json(403, {"error": str(exc)})
             except KeyError:
