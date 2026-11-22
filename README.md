@@ -1,18 +1,19 @@
 # Crownfall — The Last Banner
 
-A playable fantasy conquest game built for a website. Command the blue kingdom, recruit soldiers, strengthen castles, and march on neighboring strongholds. Capture six of nine strongholds before nightfall to claim the crown.
+A single-player conquest game for the browser. You command the blue house on a 3x3 map of strongholds and win by holding six of the nine, or the most land when round 30 ends. The rules engine is Python 3.12 standard library only; rival houses are played by simple local opponents, or optionally by Claude and GPT.
 
-The interface is a full-screen animated battlefield, with no AI branding or technical controls. Claude and GPT can drive rival kingdoms behind the scenes; the free local mode uses deterministic opponents.
+```sh
+python -m engine.server                    # then open http://127.0.0.1:8000
+python -m unittest discover -s tests -v    # 8 tests
+```
+
+Click **Raise your banner** to start. Demo mode is the default: deterministic local opponents, no API keys, no cost. Live Claude/GPT opponents need server-side keys and an access token (see below) and have not yet been verified against the real APIs.
+
+Layout: `engine/game.py` (rules), `engine/agents.py` (model adapters), `engine/server.py` (HTTP API + SQLite), `web/index.html` (the whole client).
 
 ## Play
 
-Python 3.12+, no third-party dependencies:
-
-```sh
-python -m engine.server
-```
-
-Open http://127.0.0.1:8000, then **Raise your banner**. Orders resolve every four seconds. When you do not issue an order, your soldiers hold position and gather supplies. Campaigns persist in SQLite; **Continue campaign** restores the browser's last campaign.
+Orders resolve every four seconds. If you don't issue one, your selected stronghold holds and gathers supplies. Campaigns persist in SQLite, and **Continue campaign** restores the browser's last one.
 
 | Control | Action |
 | --- | --- |
@@ -27,9 +28,7 @@ Open http://127.0.0.1:8000, then **Raise your banner**. Orders resolve every fou
 | M | Toggle synthesized sound |
 | ? / H | Open the field manual |
 
-The game pauses when its window loses focus. Sound starts muted and only plays after enabling it. Reduced-motion preferences reduce environmental motion and disable combat shake.
-
-Animation includes swaying trees, marching squads with leg movement, idle soldiers, waving flags, chimney smoke, drifting cloud shadows, moving river glints, circling birds, pulsing selection rings, animated attack routes, reinforcement effects, combat particles, camera shake, victory bursts, and a dawn-to-dusk color shift. Terrain and castles render procedurally on Canvas; no downloaded art assets are required. Google Fonts are optional, with local font fallbacks.
+The game pauses when its window loses focus. Sound starts muted and is synthesized with Web Audio. Reduced-motion preferences calm the environmental animation and turn off combat shake. Everything on the battlefield is drawn procedurally on Canvas, so there are no art assets; Google Fonts load if available, with local fallbacks.
 
 ## Rules
 
@@ -53,16 +52,16 @@ Use host-managed secrets from `.env.example`; Python does not automatically load
 
 Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `PLAY_ACCESS_TOKEN` on the server. For deployed live play, your authenticated website backend must inject the engine bearer token server-side. Access `/play/?mode=live` through that backend. Default mode is free/demo. The browser has no token field and no provider secrets. Model IDs are configurable; verify availability with the provider accounts.
 
-Each live round makes up to three parallel model calls, including the Aurora adviser whose proposal is overridden by direct player commands. These roles use the same game snapshot; only deterministic engine rules can change the state. Output is capped at 300 tokens per call, with a 35-second timeout. No recursive spawning, tools, shell execution, or automatic retries. The game waits for provider completion before scheduling the next four-second round. Live rounds therefore take longer than local rounds.
+Each live round makes up to three parallel model calls, including the Aurora adviser whose proposal is overridden by direct player commands. These roles use the same game snapshot; only deterministic engine rules can change the state. Output is capped at 300 tokens per call with a 35-second timeout. Models get no tools and failed calls are not retried automatically. The next four-second countdown starts only after all calls return, so live rounds run slower than demo rounds.
 
-Provider failure or an invalid model order does not commit the round. The game pauses and lets the player retry; a retry can incur new charges. Live API calls have not been verified because this workspace has no provider credentials.
+Provider failure or an invalid model order does not commit the round. The game pauses and lets the player retry; a retry can incur new charges. Live API calls have not been verified yet: the provider adapters are only tested against mocked responses.
 
 ## Architecture and API
 
-- `web/index.html`: Canvas game, animation loop, touch/mouse and keyboard controls, Web Audio effects, and presentation.
-- `engine/game.py`: authoritative rules, validation, seeded resolution, and local opponents.
-- `engine/agents.py`: configurable Claude/GPT adapters and bounded parallel planning.
-- `engine/server.py`: HTTP API and SQLite campaigns/atomic turn journals, including before/after hashes.
+- `web/index.html`: Canvas rendering, animation loop, mouse/touch and keyboard input, sound. It holds no rules; it posts orders and draws the result.
+- `engine/game.py`: authoritative rules, validation, seeded resolution and the demo opponents.
+- `engine/agents.py`: Claude/GPT adapters and bounded parallel planning.
+- `engine/server.py`: HTTP API, SQLite campaigns and an atomic per-turn journal with before/after state hashes.
 
 | Method | Path | Request / result |
 | --- | --- | --- |
@@ -87,4 +86,4 @@ Use one process: the global turn lock intentionally allows one round across all 
 python -m unittest discover -s tests -v
 ```
 
-Eight tests cover seeded replay over 20 worlds, invariants, invalid orders, persistence, player overrides, stale rounds, provider rollback, provider contract mocks, and HTTP gameplay/access control. Chromium checks cover the title screen, recruitment, keyboard attack, round resolution, pause/resume, help, arrows, number keys, sound toggling, and mobile layout.
+Eight tests cover seeded replay over 20 worlds, rule invariants, invalid orders, persistence, player overrides, stale rounds, rollback on provider failure, provider request shapes (mocked) and HTTP gameplay/access control. There are no automated browser tests in the repo; the client was checked in Chromium for the title screen, recruiting, keyboard attacks, round resolution, pause/resume, help, arrow and number keys, sound toggling and mobile layout. CI runs the unit tests on every push.
